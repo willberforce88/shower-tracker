@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elegant Shower Tracker</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #f8f8f8;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    color: #1c1c1c;
+  }
+  h1 {
+    margin-bottom: 20px;
+    font-weight: 600;
+  }
+  .tracker-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+  }
+  .tracker {
+    background: #ffffffcc;
+    border-radius: 20px;
+    padding: 20px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    position: relative;
+    z-index: 2;
+  }
+  .section {
+    margin-bottom: 20px;
+  }
+  label {
+    display: block;
+    margin-bottom: 5px;
+  }
+  input[type='number'] {
+    width: 100%;
+    padding: 8px;
+    border-radius: 10px;
+    border: 1px solid #ccc;
+    margin-bottom: 10px;
+  }
+  button {
+    padding: 12px 20px;
+    border: none;
+    border-radius: 10px;
+    background: #007aff;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+  }
+  .stats {
+    margin-top: 20px;
+  }
+  canvas.usageChart {
+    width: 100% !important;
+    max-width: 100%;
+  }
+  .rain-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+    border-radius: 20px;
+  }
+</style>
+</head>
+<body>
+<h1>Shower Tracker</h1>
+<div class="tracker-wrapper">
+  <canvas class="rain-overlay" id="rainCanvas"></canvas>
+  <div class="tracker">
+    <div class="section">
+      <button id="startStopBtn">Start Shower</button>
+      <p>Duration: <span id="duration">00:00</span></p>
+      <p>Cost: £<span id="cost">0.00</span></p>
+    </div>
+
+    <div class="section">
+      <label for="tariff">UK Gas Tariff (p/kWh)</label>
+      <input type="number" id="tariff" placeholder="e.g., 24.26" value="24.26">
+
+      <label for="moneyCap">Shower Money Cap (£)</label>
+      <input type="number" id="moneyCap" placeholder="e.g., 0.20" value="0.2">
+    </div>
+
+    <div class="section stats">
+      <h3>Usage Stats</h3>
+      <p>Total Showers: <span id="totalShowers">0</span></p>
+      <p>Total Time: <span id="totalTime">00:00</span></p>
+      <p>Total Cost: £<span id="totalCost">0.00</span></p>
+      <p>Average Time: <span id="avgTime">00:00</span></p>
+      <p>Average Cost: £<span id="avgCost">0.00</span></p>
+    </div>
+    <canvas id="usageChart" class="usageChart"></canvas>
+  </div>
+</div>
+
+<audio id="beep" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" preload="auto"></audio>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+let startTime, timerInterval, beeping=false, rainInterval;
+let totalShowers=0, totalSeconds=0, totalCost=0;
+const startStopBtn=document.getElementById('startStopBtn');
+const durationEl=document.getElementById('duration');
+const costEl=document.getElementById('cost');
+const tariffEl=document.getElementById('tariff');
+const moneyCapEl=document.getElementById('moneyCap');
+const beepSound=document.getElementById('beep');
+
+function formatTime(seconds){
+  const mins=Math.floor(seconds/60).toString().padStart(2,'0');
+  const secs=(seconds%60).toString().padStart(2,'0');
+  return `${mins}:${secs}`;
+}
+function calculateCost(seconds){
+  const kWhPerMinute=0.066;
+  const tariff=parseFloat(tariffEl.value)/100;
+  return (seconds/60)*kWhPerMinute*tariff;
+}
+function updateStats(duration,cost){
+  totalShowers++;
+  totalSeconds+=duration;
+  totalCost+=cost;
+  document.getElementById('totalShowers').innerText=totalShowers;
+  document.getElementById('totalTime').innerText=formatTime(totalSeconds);
+  document.getElementById('totalCost').innerText=totalCost.toFixed(2);
+  document.getElementById('avgTime').innerText=formatTime(Math.floor(totalSeconds/totalShowers));
+  document.getElementById('avgCost').innerText=(totalCost/totalShowers).toFixed(2);
+}
+
+const rainCanvas=document.getElementById('rainCanvas');
+const rainCtx=rainCanvas.getContext('2d');
+function resizeCanvas(){
+  rainCanvas.width=rainCanvas.clientWidth;
+  rainCanvas.height=rainCanvas.clientHeight;
+}
+window.addEventListener('resize',resizeCanvas);
+resizeCanvas();
+let drops=[];
+function createDrop(){ return {x:Math.random()*rainCanvas.width, y:Math.random()*rainCanvas.height, length:Math.random()*15+10, speed:Math.random()*2+2}; }
+for(let i=0;i<150;i++) drops.push(createDrop());
+function drawRain(){
+  rainCtx.clearRect(0,0,rainCanvas.width,rainCanvas.height);
+  rainCtx.strokeStyle='rgba(0,122,255,0.3)';
+  rainCtx.lineWidth=2;
+  drops.forEach(d=>{
+    rainCtx.beginPath();
+    rainCtx.moveTo(d.x,d.y);
+    rainCtx.lineTo(d.x,d.y+d.length);
+    rainCtx.stroke();
+    d.y+=d.speed;
+    if(d.y>rainCanvas.height) d.y=-10;
+  });
+}
+function startRain(){ rainInterval=setInterval(drawRain,30); }
+function stopRain(){ clearInterval(rainInterval); rainCtx.clearRect(0,0,rainCanvas.width,rainCanvas.height); }
+
+function startShower(){
+  startTime=Date.now();
+  startStopBtn.innerText='Stop Shower';
+  startRain();
+  timerInterval=setInterval(()=>{
+    const elapsed=Math.floor((Date.now()-startTime)/1000);
+    const cost=calculateCost(elapsed);
+    durationEl.innerText=formatTime(elapsed);
+    costEl.innerText=cost.toFixed(2);
+    if(cost>=parseFloat(moneyCapEl.value)&&!beeping){
+      beepSound.loop=true;
+      beepSound.play();
+      beeping=true;
+    }
+  },1000);
+}
+function stopShower(){
+  clearInterval(timerInterval);
+  stopRain();
+  const elapsed=Math.floor((Date.now()-startTime)/1000);
+  const cost=calculateCost(elapsed);
+  updateStats(elapsed,cost);
+  startStopBtn.innerText='Start Shower';
+  if(beeping){ beepSound.pause(); beepSound.currentTime=0; beeping=false; }
+  durationEl.innerText='00:00';
+  costEl.innerText='0.00';
+}
+startStopBtn.addEventListener('click',()=>{ if(timerInterval) stopShower(); else startShower(); });
+
+const ctx=document.getElementById('usageChart').getContext('2d');
+const usageChart=new Chart(ctx,{ type:'line', data:{ labels:['Week 1','Week 2','Week 3','Week 4'], datasets:[{ label:'Shower Costs (£)', data:[0,0,0,0], borderColor:'#007aff', backgroundColor:'rgba(0,122,255,0.2)', tension:0.4, fill:true }] }, options:{ responsive:true, plugins:{legend:{display:true}}, scales:{y:{beginAtZero:true}} } });
+</script>
+</body>
+</html>
